@@ -56,6 +56,4 @@ This application is configured for deployment on [Railway](https://railway.app/)
 
 ## Submission Details
 
-- **Live URL:** `[Add your Railway URL here]`
-- **GitHub Repo:** `[Add your GitHub repo link here]`
-- **Demo Video:** `[Add the link to your 2-5 min demo video here]`
+- **Live URL:** `https://companyassignmentt-production.up.railway.app/`
