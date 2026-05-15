@@ -1,59 +1,69 @@
-# Team Task Manager (Full-Stack)
+# Team Task Manager
 
-A full-stack web application where users can create projects, assign tasks, and track progress with role-based access (Admin/Member).
+**🔴 Live Application:** [https://companyassignmentt-production.up.railway.app/](https://companyassignmentt-production.up.railway.app/)
 
-## Key Features
-- **Authentication:** Signup and Login powered by Supabase Auth.
-- **Project & Team Management:** Create projects and add members as Admins or standard Members.
-- **Task Management:** Create tasks, assign them to team members, set due dates, priorities, and track status.
-- **Dashboard:** At-a-glance overview of tasks, their statuses, and overdue items.
-- **Role-Based Access Control:** Only project Admins can edit/delete projects and team members. All team members can manage their own tasks.
+A full-stack web application for teams to create projects, assign tasks, and track progress, featuring robust role-based access control (Admin/Member).
 
-## Tech Stack
-- **Frontend:** React, Vite, Tailwind CSS, shadcn/ui (Radix UI), TanStack Router & Query.
-- **Backend & Database:** Supabase (PostgreSQL, Row Level Security, Auth).
-- **Deployment:** Railway.
+## 🚀 Key Features
 
----
+*   **Authentication**: Secure Signup and Login using Firebase Authentication.
+*   **Project & Team Management**: 
+    *   Create projects and become the project owner.
+    *   Add team members to projects and assign roles (Admin/Member).
+    *   Admins have the ability to remove members, modify roles, and delete the project.
+*   **Task Creation, Assignment & Status Tracking**:
+    *   Create tasks with titles, descriptions, priorities, and due dates (Admin only).
+    *   Assign tasks to specific team members.
+    *   Track and update task status (To Do, In Progress, Done). Task status can only be updated by Admins or the assigned Member.
+*   **Role-Based Access Control**:
+    *   **Admin**: Full control over the project, including managing tasks, members, and project deletion.
+    *   **Member**: Read access to the project tasks and ability to update the status of tasks assigned specifically to them.
+*   **Interactive Dashboard**: View a personalized overview of assigned tasks, their current statuses, and track overdue tasks.
 
-## Local Setup
+## 🛠️ Technology Stack
 
-### Prerequisites
-- Node.js (v18+)
-- Supabase Project (with the provided SQL migrations applied)
+*   **Frontend**: React, Vite, TanStack Router, TypeScript
+*   **Styling**: Tailwind CSS, shadcn/ui components
+*   **Backend / Database**: Firebase (Firestore - NoSQL)
+*   **Authentication**: Firebase Auth
+*   **Validation**: Zod for structured data and schema validation
 
-### Environment Variables
-Create a `.env` file in the root directory and add your Supabase credentials:
-```env
-VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-```
+## 📦 Local Development
 
-### Run Locally
-1. **Install dependencies:**
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd <repository-directory>
+   ```
+
+2. **Install dependencies:**
    ```bash
    npm install
    ```
-2. **Start the development server:**
+
+3. **Environment Setup:**
+   Create a `.env` file in the root directory and add your Firebase configuration variables.
+
+4. **Run the development server:**
    ```bash
    npm run dev
    ```
+   The application will be running at `http://localhost:8080/`.
 
----
+## 🌐 Deployment
 
-## Deployment (Railway)
+This application is successfully deployed on Railway.
 
-This application is configured for deployment on [Railway](https://railway.app/).
+**Live URL:** [https://companyassignmentt-production.up.railway.app/](https://companyassignmentt-production.up.railway.app/)
 
-1. Create a new project on Railway.
-2. Select **Deploy from GitHub repo** and connect this repository.
-3. Once connected, go to your Railway Project **Variables** and add:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
-4. Railway will automatically detect the Node.js environment, install dependencies, build the project (`npm run build`), and start it (`npm run start`).
+To deploy your own instance on Railway:
+1. Connect your GitHub repository to Railway.
+2. Add the required environment variables (Firebase config) to the Railway project settings.
+3. Railway will automatically detect the Vite build process (`npm run build`) and deploy the application.
 
----
+## 🗄️ Database Structure (Firestore)
 
-## Submission Details
-
-- **Live URL:** `https://companyassignmentt-production.up.railway.app/`
+*   **`profiles`**: Stores user account details (linked to Firebase Auth UID).
+*   **`projects`**: Stores project metadata (name, description, owner_id).
+*   **`project_members`**: A mapping collection defining which users belong to which project, along with their specific role (`admin` or `member`).
+*   **`tasks`**: Stores individual tasks, referencing the `project_id` and the `assignee_id`.
