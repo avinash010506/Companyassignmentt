@@ -2,7 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/firebase";
+import { collection, query, getDocs, getDoc, doc, updateDoc, deleteDoc, addDoc, where } from "firebase/firestore";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,18 +55,33 @@ function ProjectDetail() {
   const [myRole, setMyRole] = useState<Role | null>(null);
 
   async function load() {
-    const [p, m, t] = await Promise.all([
-      supabase.from("projects").select("*").eq("id", projectId).maybeSingle(),
-      supabase.from("project_members").select("id, user_id, role, profiles(full_name, email)").eq("project_id", projectId),
-      supabase.from("tasks").select("*").eq("project_id", projectId).order("created_at", { ascending: false }),
-    ]);
-    if (p.error) toast.error(p.error.message);
-    setProject((p.data as Project) ?? null);
-    const ms = (m.data ?? []) as unknown as Member[];
-    setMembers(ms);
-    setTasks((t.data ?? []) as Task[]);
-    setMyRole(ms.find((x) => x.user_id === user?.id)?.role ?? null);
-    setLoading(false);
+    try {
+      const pDoc = await getDoc(doc(db, "projects", projectId));
+      if (!pDoc.exists()) {
+        setLoading(false);
+        return;
+      }
+      setProject({ id: pDoc.id, ...pDoc.data() } as Project);
+
+      const mSnap = await getDocs(query(collection(db, "project_members"), where("project_id", "==", projectId)));
+      const ms = mSnap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as Member));
+      for (const m of ms) {
+         const profileDoc = await getDoc(doc(db, "profiles", m.user_id));
+         m.profiles = profileDoc.exists() ? (profileDoc.data() as any) : null;
+      }
+      setMembers(ms);
+
+      const tSnap = await getDocs(query(collection(db, "tasks"), where("project_id", "==", projectId)));
+      const ts = tSnap.docs.map(d => ({ id: d.id, ...d.data() } as Task));
+      ts.sort((a, b) => new Date((b as any).created_at || 0).getTime() - new Date((a as any).created_at || 0).getTime());
+      setTasks(ts);
+
+      setMyRole(ms.find((x) => x.user_id === user?.uid)?.role ?? null);
+      setLoading(false);
+    } catch (e: any) {
+      toast.error(e.message);
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -111,7 +127,7 @@ function ProjectDetail() {
             tasks={tasks}
             members={members}
             isAdmin={isAdmin}
-            currentUserId={user!.id}
+            currentUserId={user!.uid}
             projectId={projectId}
             onChange={load}
           />
@@ -156,17 +172,24 @@ function TasksPanel({
     });
     if (!parsed.success) return toast.error(parsed.error.issues[0].message);
     setBusy(true);
-    const { error } = await supabase.from("tasks").insert({
-      project_id: projectId,
-      title: parsed.data.title,
-      description: parsed.data.description ?? null,
-      priority: parsed.data.priority,
-      assignee_id: parsed.data.assignee_id,
-      due_date: parsed.data.due_date,
-      created_by: currentUserId,
-    });
-    setBusy(false);
-    if (error) return toast.error(error.message);
+    try {
+      await addDoc(collection(db, "tasks"), {
+        project_id: projectId,
+        title: parsed.data.title,
+        description: parsed.data.description ?? null,
+        priority: parsed.data.priority,
+        assignee_id: parsed.data.assignee_id,
+        due_date: parsed.data.due_date,
+        created_by: currentUserId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        status: "todo",
+      });
+      setBusy(false);
+    } catch (e: any) {
+      setBusy(false);
+      return toast.error(e.message);
+    }
     toast.success("Task added");
     setForm({ title: "", description: "", priority: "medium", assignee_id: "unassigned", due_date: "" });
     setOpen(false);
@@ -174,17 +197,23 @@ function TasksPanel({
   }
 
   async function updateStatus(t: Task, status: TaskStatus) {
-    const { error } = await supabase.from("tasks").update({ status }).eq("id", t.id);
-    if (error) return toast.error(error.message);
-    onChange();
+    try {
+      await updateDoc(doc(db, "tasks", t.id), { status, updated_at: new Date().toISOString() });
+      onChange();
+    } catch (e: any) {
+      return toast.error(e.message);
+    }
   }
 
   async function deleteTask(t: Task) {
     if (!confirm("Delete this task?")) return;
-    const { error } = await supabase.from("tasks").delete().eq("id", t.id);
-    if (error) return toast.error(error.message);
-    toast.success("Task deleted");
-    onChange();
+    try {
+      await deleteDoc(doc(db, "tasks", t.id));
+      toast.success("Task deleted");
+      onChange();
+    } catch (e: any) {
+      return toast.error(e.message);
+    }
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -344,38 +373,48 @@ function MembersPanel({
     const parsed = memberSchema.safeParse(form);
     if (!parsed.success) return toast.error(parsed.error.issues[0].message);
     setBusy(true);
-    // Look up user by email in profiles
-    const { data: profile, error: pErr } = await supabase
-      .from("profiles").select("id").eq("email", parsed.data.email).maybeSingle();
-    if (pErr || !profile) {
+    try {
+      const pSnap = await getDocs(query(collection(db, "profiles"), where("email", "==", parsed.data.email)));
+      if (pSnap.empty) {
+        setBusy(false);
+        return toast.error("No user with that email. They need to sign up first.");
+      }
+      const profile = { id: pSnap.docs[0].id };
+      
+      await addDoc(collection(db, "project_members"), {
+        project_id: projectId, user_id: profile.id, role: parsed.data.role, created_at: new Date().toISOString()
+      });
       setBusy(false);
-      return toast.error("No user with that email. They need to sign up first.");
+      toast.success("Member added");
+      setForm({ email: "", role: "member" });
+      setOpen(false);
+      onChange();
+    } catch (e: any) {
+      setBusy(false);
+      return toast.error(e.message.includes("duplicate") ? "Already a member" : e.message);
     }
-    const { error } = await supabase.from("project_members").insert({
-      project_id: projectId, user_id: profile.id, role: parsed.data.role,
-    });
-    setBusy(false);
-    if (error) return toast.error(error.message.includes("duplicate") ? "Already a member" : error.message);
-    toast.success("Member added");
-    setForm({ email: "", role: "member" });
-    setOpen(false);
-    onChange();
   }
 
   async function changeRole(m: Member, role: Role) {
-    const { error } = await supabase.from("project_members").update({ role }).eq("id", m.id);
-    if (error) return toast.error(error.message);
-    toast.success("Role updated");
-    onChange();
+    try {
+      await updateDoc(doc(db, "project_members", m.id), { role });
+      toast.success("Role updated");
+      onChange();
+    } catch (e: any) {
+      return toast.error(e.message);
+    }
   }
 
   async function removeMember(m: Member) {
     if (m.user_id === ownerId) return toast.error("Cannot remove the project owner");
     if (!confirm("Remove this member?")) return;
-    const { error } = await supabase.from("project_members").delete().eq("id", m.id);
-    if (error) return toast.error(error.message);
-    toast.success("Member removed");
-    onChange();
+    try {
+      await deleteDoc(doc(db, "project_members", m.id));
+      toast.success("Member removed");
+      onChange();
+    } catch (e: any) {
+      return toast.error(e.message);
+    }
   }
 
   return (
