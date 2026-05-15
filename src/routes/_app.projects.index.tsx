@@ -2,7 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/firebase";
+import { collection, query, getDocs, addDoc, where } from "firebase/firestore";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,13 +41,18 @@ function ProjectsPage() {
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const { data, error } = await supabase
-      .from("projects")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) toast.error(error.message);
-    setItems(data ?? []);
-    setLoading(false);
+    if (!user) return;
+    try {
+      const q = query(collection(db, "projects"), where("owner_id", "==", user.uid));
+      const snap = await getDocs(q);
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as ProjectRow));
+      data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setItems(data);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -59,13 +65,19 @@ function ProjectsPage() {
     const parsed = schema.safeParse(form);
     if (!parsed.success) return toast.error(parsed.error.issues[0].message);
     setBusy(true);
-    const { error } = await supabase.from("projects").insert({
-      name: parsed.data.name,
-      description: parsed.data.description || null,
-      owner_id: user.id,
-    });
-    setBusy(false);
-    if (error) return toast.error(error.message);
+    try {
+      await addDoc(collection(db, "projects"), {
+        name: parsed.data.name,
+        description: parsed.data.description || null,
+        owner_id: user.uid,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      setBusy(false);
+    } catch (error: any) {
+      setBusy(false);
+      return toast.error(error.message);
+    }
     toast.success("Project created");
     setOpen(false);
     setForm({ name: "", description: "" });
@@ -121,7 +133,7 @@ function ProjectsPage() {
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
                     <FolderKanban className="h-5 w-5" />
                   </div>
-                  {p.owner_id === user?.id && (
+                  {p.owner_id === user?.uid && (
                     <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">Owner</span>
                   )}
                 </div>
