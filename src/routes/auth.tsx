@@ -2,7 +2,9 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,10 +44,14 @@ function AuthPage() {
     const parsed = loginSchema.safeParse(login);
     if (!parsed.success) return toast.error(parsed.error.issues[0].message);
     setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword(parsed.data);
-    setBusy(false);
-    if (error) return toast.error(error.message);
-    toast.success("Welcome back!");
+    try {
+      await signInWithEmailAndPassword(auth, parsed.data.email, parsed.data.password);
+      toast.success("Welcome back!");
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleSignup(e: React.FormEvent) {
@@ -53,17 +59,20 @@ function AuthPage() {
     const parsed = signupSchema.safeParse(signup);
     if (!parsed.success) return toast.error(parsed.error.issues[0].message);
     setBusy(true);
-    const { error } = await supabase.auth.signUp({
-      email: parsed.data.email,
-      password: parsed.data.password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/dashboard`,
-        data: { full_name: parsed.data.fullName },
-      },
-    });
-    setBusy(false);
-    if (error) return toast.error(error.message);
-    toast.success("Account created!");
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, parsed.data.email, parsed.data.password);
+      await updateProfile(userCredential.user, { displayName: parsed.data.fullName });
+      await setDoc(doc(db, "profiles", userCredential.user.uid), {
+        email: parsed.data.email,
+        full_name: parsed.data.fullName,
+        created_at: new Date().toISOString()
+      });
+      toast.success("Account created!");
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
