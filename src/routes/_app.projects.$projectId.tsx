@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -47,6 +47,7 @@ const taskSchema = z.object({
 
 function ProjectDetail() {
   const { projectId } = Route.useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -61,7 +62,8 @@ function ProjectDetail() {
         setLoading(false);
         return;
       }
-      setProject({ id: pDoc.id, ...pDoc.data() } as Project);
+      const projData = { id: pDoc.id, ...pDoc.data() } as Project;
+      setProject(projData);
 
       const mSnap = await getDocs(query(collection(db, "project_members"), where("project_id", "==", projectId)));
       const ms = mSnap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as Member));
@@ -76,7 +78,11 @@ function ProjectDetail() {
       ts.sort((a, b) => new Date((b as any).created_at || 0).getTime() - new Date((a as any).created_at || 0).getTime());
       setTasks(ts);
 
-      setMyRole(ms.find((x) => x.user_id === user?.uid)?.role ?? null);
+      let role = ms.find((x) => x.user_id === user?.uid)?.role ?? null;
+      if (!role && projData.owner_id === user?.uid) {
+         role = "admin";
+      }
+      setMyRole(role);
       setLoading(false);
     } catch (e: any) {
       toast.error(e.message);
@@ -90,6 +96,20 @@ function ProjectDetail() {
   }, [user, projectId]);
 
   const isAdmin = myRole === "admin";
+
+  async function deleteProject() {
+    if (!confirm("Are you sure you want to delete this project? All tasks and members will be removed.")) return;
+    try {
+      for (const t of tasks) await deleteDoc(doc(db, "tasks", t.id));
+      for (const m of members) await deleteDoc(doc(db, "project_members", m.id));
+      await deleteDoc(doc(db, "projects", projectId));
+      
+      toast.success("Project deleted");
+      navigate({ to: "/projects" });
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (!project) {
@@ -112,7 +132,14 @@ function ProjectDetail() {
             <h1 className="text-2xl font-semibold tracking-tight">{project.name}</h1>
             {project.description && <p className="mt-1 text-sm text-muted-foreground">{project.description}</p>}
           </div>
-          <Badge variant={isAdmin ? "default" : "secondary"}>{isAdmin ? "Admin" : "Member"}</Badge>
+          <div className="flex items-center gap-3">
+            {project.owner_id === user?.uid && (
+              <Button variant="destructive" size="sm" onClick={deleteProject} className="gap-1.5 h-8">
+                <Trash2 className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Delete</span>
+              </Button>
+            )}
+            <Badge variant={isAdmin ? "default" : "secondary"} className="h-8">{isAdmin ? "Admin" : "Member"}</Badge>
+          </div>
         </div>
       </div>
 
@@ -163,6 +190,7 @@ function TasksPanel({
 
   async function createTask(e: React.FormEvent) {
     e.preventDefault();
+    if (!isAdmin) return toast.error("Only admins can create tasks.");
     const parsed = taskSchema.safeParse({
       title: form.title,
       description: form.description || undefined,
@@ -225,60 +253,62 @@ function TasksPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-1.5"><Plus className="h-4 w-4" /> New task</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Create a task</DialogTitle></DialogHeader>
-            <form onSubmit={createTask} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="tt">Title</Label>
-                <Input id="tt" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="td">Description</Label>
-                <Textarea id="td" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+      {isAdmin && (
+        <div className="flex justify-end">
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-1.5"><Plus className="h-4 w-4" /> New task</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Create a task</DialogTitle></DialogHeader>
+              <form onSubmit={createTask} className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label>Priority</Label>
-                  <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v as TaskPriority })}>
+                  <Label htmlFor="tt">Title</Label>
+                  <Input id="tt" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="td">Description</Label>
+                  <Textarea id="td" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Priority</Label>
+                    <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v as TaskPriority })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dd">Due date</Label>
+                    <Input id="dd" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Assignee</Label>
+                  <Select value={form.assignee_id} onValueChange={(v) => setForm({ ...form, assignee_id: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {members.map((m) => (
+                        <SelectItem key={m.user_id} value={m.user_id}>
+                          {m.profiles?.full_name || m.profiles?.email}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="dd">Due date</Label>
-                  <Input id="dd" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Assignee</Label>
-                <Select value={form.assignee_id} onValueChange={(v) => setForm({ ...form, assignee_id: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unassigned">Unassigned</SelectItem>
-                    {members.map((m) => (
-                      <SelectItem key={m.user_id} value={m.user_id}>
-                        {m.profiles?.full_name || m.profiles?.email}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <DialogFooter>
-                <Button type="submit" disabled={busy}>{busy ? "Adding…" : "Add task"}</Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </div>
+                <DialogFooter>
+                  <Button type="submit" disabled={busy}>{busy ? "Adding…" : "Add task"}</Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         {columns.map((col) => {
