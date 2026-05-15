@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/firebase";
+import { collection, query, getDocs, orderBy, limit, where, getDoc, doc } from "firebase/firestore";
 import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -36,27 +37,54 @@ function Dashboard() {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      const [projects, tasks, recentRes] = await Promise.all([
-        supabase.from("projects").select("id"),
-        supabase.from("tasks").select("id, status, due_date"),
-        supabase
-          .from("tasks")
-          .select("id, title, status, due_date, project_id, projects(name)")
-          .order("updated_at", { ascending: false })
-          .limit(6),
-      ]);
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        
+        const projectsQuery = query(collection(db, "projects"), where("owner_id", "==", user.uid));
+        const projectsSnap = await getDocs(projectsQuery);
+        const projectsData = projectsSnap.docs.map(d => ({ id: d.id, ...d.data() } as { id: string; name: string }));
+        const projectIds = projectsData.map(p => p.id);
+        
+        let t: any[] = [];
+        let recentResData: any[] = [];
+        
+        if (projectIds.length > 0) {
+          // We query tasks that belong to user's projects.
+          // For simplicity and since Firestore 'in' has a 10-item limit, we fetch all tasks
+          // and filter locally if projectIds > 10, or just chunk it.
+          // We'll just fetch tasks by project_id in chunks of 10.
+          let tasksData: any[] = [];
+          for (let i = 0; i < projectIds.length; i += 10) {
+             const chunk = projectIds.slice(i, i + 10);
+             const q = query(collection(db, "tasks"), where("project_id", "in", chunk));
+             const snap = await getDocs(q);
+             tasksData.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          }
+          t = tasksData;
 
-      const t = tasks.data ?? [];
-      setStats({
-        projects: projects.data?.length ?? 0,
-        todo: t.filter((x) => x.status === "todo").length,
-        inProgress: t.filter((x) => x.status === "in_progress").length,
-        done: t.filter((x) => x.status === "done").length,
-        overdue: t.filter((x) => x.status !== "done" && x.due_date && x.due_date < today).length,
-      });
-      setRecent((recentRes.data ?? []) as RecentTask[]);
-      setLoading(false);
+          // Recent 6 tasks
+          recentResData = [...tasksData]
+            .sort((a, b) => ((b.updated_at || "") as string).localeCompare((a.updated_at || "") as string))
+            .slice(0, 6)
+            .map(task => ({
+              ...task,
+              projects: { name: projectsData.find(p => p.id === task.project_id)?.name || "Unknown" }
+            }));
+        }
+
+        setStats({
+          projects: projectsData.length,
+          todo: t.filter((x) => x.status === "todo").length,
+          inProgress: t.filter((x) => x.status === "in_progress").length,
+          done: t.filter((x) => x.status === "done").length,
+          overdue: t.filter((x) => x.status !== "done" && x.due_date && x.due_date < today).length,
+        });
+        setRecent(recentResData as RecentTask[]);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [user]);
 
