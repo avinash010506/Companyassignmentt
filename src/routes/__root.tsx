@@ -31,7 +31,10 @@ export const Route = createRootRoute({
       { title: "Taskly — Team Task Manager" },
       { name: "description", content: "Plan projects, assign tasks, and track team progress." },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      { rel: "stylesheet", href: appCss }
+    ],
   }),
   shellComponent: RootShell,
   component: RootComponent,
